@@ -1,0 +1,180 @@
+https://quera.org/college/14961/chapter/60976/lesson/207224/?comments_page=1&comments_filter=ALL
+
+gRPC چیست؟ درس‌نامه
+بازنویسی یک rest api با grpc درس‌نامه
+بازنویسی یک rest api با grpc
+در این درسنامه می‌خواهیم نحوه ساخت یک API با gRPC را بررسی کنیم. اما ابتدا به کد زیر که یک REST API ساده برای سلام کردن به کاربر با اسم مشخص شده می‌باشد دقت کنید:
+
+extensionFromNameserver.go
+func main() {
+    http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        name := r.FormValue("name")
+
+        if string(name) == "" {
+            w.WriteHeader(http.StatusBadRequest)
+            return
+        }
+
+        w.WriteHeader(http.StatusOK)
+        fmt.Fprintf(w, "hello, %s", string(name))
+    })
+    log.Fatal(http.ListenAndServe(":42069", nil))
+}
+Go
+extensionFromNameclient.go
+func main() {
+    resp, err := http.PostForm("http://localhost:42069/", url.Values{
+        "name": {"quera"},
+    })
+    if err != nil {
+        fmt.Println(err)
+    }
+    defer resp.Body.Close()
+
+    b, err := io.ReadAll(resp.Body)
+    if err != nil {
+        fmt.Println(err)
+    }
+
+    fmt.Println(string(b))
+}
+Go
+با کد‌های بالا اگر سرور را اجرا و سپس کلاینت را اجرا کنیم یک درخواست به سرور با محتویات یک Key, Value با مقادیر name و quera ارسال می‌کنیم و در جواب hello, quera را دریافت می‌کنیم، در ادامه می‌خواهیم همچین ساختاری را با gRPC و پروتکل بافر پیاده‌سازی کنیم.
+
+آموزش ساخت سرور gRPC
+برای سختن یک وب‌سرویس توسط gRPC و گولنگ قدم‌های زیر را در پیش‌داریم:
+
+ساختن فایل پروتو
+تبدیل فایل پروتو به فایل گو
+وراثت اینترفیس gRPC
+ساختن سرویس درخواست کلاینت
+قدم اول: ساختن فایل پروتو
+یک فایل پروتو با نام greeting.proto بسازید:
+
+extensionFromNamegreeting.proto
+syntax = "proto3";
+
+option go_package = "/pb";
+
+service GreetingService {
+    rpc Greeting(GreetingServiceRequest) returns (GreetingServiceReply) {}
+}
+
+message GreetingServiceRequest {
+    string name = 1
+}
+
+message GreetingServiceReply {
+    string message = 2
+}
+Proto3
+در سینتکس بالا بخش‌های مختلفی داریم:
+
+در خط اول سینتکس را مشخص کردیم و آن را برابر با proto3 گذاشتیم به دلیل این‌کار در درسنامه قبل اشاره کردیم.
+در خط دوم تعریف شده که برای استفاده از این ساختار در آدرس و پکیج /pb ذخیره شود تا بتوان با فراخوانی این پکیج از آن در گولنگ استفاده کرد.
+در بخش سوم یک سرویس rpc به نام GreetingService تعریف شده که شامل یک تابع بوده که نام Greeting داشته و یک ریکوئست دریافت و یک ریپلای بر‌میگرداند که ساختار این دو را در ادامه مشخص کردیم.
+با message GreetingServiceRequest ساختار پیامی یک ریکوئست را مشخص کردیم که شامل یک رشته نام بوده بنام name توجه کنید و مقدار عددی 1 به آن داده شده.
+با message GreetingServiceReply ساختار پیامی یک ریپلای تعریف شده که شامل یک رشته جواب به نام message می‌باشد
+توجه کنید که در ساختار‌های خود مقدار های متفاوتی به بخش‌های مختلف دادیم و هیچ‌گاه از یک عدد برای دو فیلد استفاده نکردیم
+
+قدم دوم: تبدیل یک فایل پروتو به گو
+برای تبدیل یک فایل پروتو به معادل گولنگ آن نیاز به نصب کامپایر پروتو دارید که در درسنامه قبل چگونگی آن مورد بررسی قرار گرفت، بعد از نصب کامپایر با دستور زیر یک فایل پروتو را به فایل گو و gRPC تبدیل کنیم
+
+protoc <proto=file-path> --go_out=<output-file-path> --go-grpc-out=<output-file-path>
+Plain text
+این دستور را برای فایلی که در قدم اول ساختیم استفاده کنید تا آن را تبدیل به یک فایل گو و gRPC کنید:
+
+protoc greeting.proto --go_out=./ --go-grpc_out=./
+
+
+Plain text
+سپس در دایرکتوری pb دو فایل ساخته شده که در فایل greeting_grpc.pb.go یک اینتفریس ساخته شده که به شکل زیر می‌باشد
+
+type GreetingServiceServer interface {
+    Greeting(context.Context, *GreetingServiceRequest) (*GreetingServiceReply, error)
+}
+
+
+توجه کنید که در صورت نصب نبودن درست کامپایلر ممکن است ارور هایی مبنی بر نداشتن protoc-go-gen و protoc-go-gen-grpc بگیرید، برای نصب آن‌ها می‌توانید از دستور‌های زیر استفاده کنید
+
+go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
+
+Plain text
+قدم سوم: وراثت اینترفیس gRPC
+سپس باید این اینترفیس ساخته شده را در برنامه خود پیاده‌سازی کنیم و از آن استفاده کنیم، یک فایل server.go در دایرکتوری جدیدی به نام server ساخته و آن را به شکل زیر پر می‌کنیم:
+
+extensionFromNamemain.go
+package main
+
+import (
+    "context"
+    "fmt"
+    "grpc-golang/pb"
+    "log"
+    "net"
+
+    "google.golang.org/grpc"
+)
+
+type server struct {
+    pb.GreetingServiceServer
+}
+
+func (s *server) Greeting(ctx context.Context, req *pb.GreetingServiceRequest) (*pb.GreetingServiceReply, error) {
+    return &pb.GreetingServiceReply{
+        Message: fmt.Sprintf("Hello, %s", req.Name),
+    }, nil
+}
+
+func main() {
+    listener, err := net.Listen("tcp", ":8080")
+    if err != nil {
+        panic(err)
+    }
+
+    s := grpc.NewServer()
+    pb.RegisterGreetingServiceServer(s, &server{})
+    if err := s.Serve(listener); err != nil {
+        log.Fatalf("failed to serve: %v", err)
+    }
+}
+Go
+در این فایل ابتدا یک سرور ساخته شده که دارای یک اینترفیس از همان اینترفیس ساخته شده در قدم دوم می‌باشد، سپس برای این سرور یک متد ساخته‌ایم تا آن اینترفیس را پیاده‌سازی کند، همانطور که می‌بینید تنها کاری که این متد انجام می‌دهد این می‌باشد که یک ورودی از جنس درخواستی که در فایل .proto تعریف کردیم را تحویل گرفته و یک خروجی از جنس جوابی که در فایل .proto تعریف کردیم بر می‌گرداند و پیام آن به شخصی که اسمش در درخواست قرار دارد سلام می‌کند!
+
+سپس یک سرور جدید gRPC می‌سازیم (s := grpc.NewServer()) و با دستور pb.RegisterGreetingServiceServer(s, &server{}) آن را ثبت و از جنس سرور مورد نظر خود می‌کنیم، سپس می‌توانیم با دستور s.Serve(listener) سرور خود را به راه بیاندازیم.
+
+حالا می‌توانیم سرور خود را با دستور go run server.go در ترمینال شروع کنیم.
+
+قدم چهار: ساختن کلاینت و ارسال درخواست
+بعد از شروع سرور، باید یک کلاینت بسازیم تا به سرورمان درخواست بفرستد، برای این‌ کار یک فایل به نام client.go بسازید، و به شکل زیر آن را پر کنید:
+
+extensionFromNameclient.go
+package main
+
+import (
+    "context"
+    "fmt"
+    "grpc-golang/pb"
+    "log"
+    "google.golang.org/grpc"
+)
+
+func main() {
+        opts := grpc.WithTransportCredentials(insecure.NewCredentials())
+    cc, err := grpc.Dial("localhost:8080", opts)
+    if err != nil {
+        panic(err)
+    }
+    defer cc.Close()
+
+    client := pb.NewGreetingServiceClient(cc)
+    request := &pb.GreetingServiceRequest{Name: "Quera"}
+
+    reply, err := client.Greeting(context.Background(), request)
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println(reply.Message)
+}
